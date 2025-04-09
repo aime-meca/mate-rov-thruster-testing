@@ -69,14 +69,14 @@ const ProfileSegment PwmProfile[4] = {
 
 // NOTE: Make sure to double check this after editing the profile above
 const unsigned long PROFILE_DURATION_MS = 20000;
+static unsigned long GLOBAL_START_TIME_US;
 
 //////////////////////////////
 // Initialization Constants //
 //////////////////////////////
 
-// The amount of time to delay before entering loop(), to allow
-// enough time to start the serial monitor PowerShell script
-#define SETUP_DELAY 10000 // ms
+#define THRUSTER_DELAY 4000 // ms     // The amount of time to delay per each step of ESC initialization
+#define FULL_ESC_INIT  1              // Whether to enable the full ESC initialization procedure
 
 ///////////////////////////////
 // Sensor-specific variables //
@@ -123,34 +123,52 @@ float fetchCurrentReading() {
 
 // NOTE: Current Sensor just needs to read from A0, so it's pre-initialized
 void setup() {
-  // NOTE: Supported baud rates are 300, 600, 1200, 2400, 4800, 9600, 14400, 19200, 28800, 31250, 38400, 57600, 115200
+  // NOTE: Supported baud rates are:
+  //   300, 600, 1200, 2400, 4800, 9600, 14400,
+  //   19200, 28800, 31250, 38400, 57600, 115200
   Serial.begin(115200);
 
   // Setup thruster
+  Serial.println("Setting up thruster parameters...");
   thruster.attach(SERVO_PIN, P_LOW, P_HIGH);
 
   // Setup Load Cell Amplifier
+  Serial.println("Setting up and calibrating load cell...");
   loadCell.begin(LCA_DOUT, LCA_CLK);
   loadCell.set_scale(LCA_CALIB_FACTOR);
   loadCell.tare(); // Zero out load sensor assuming there is no applied load
 
   // Start thruster ESC initialization
-  delay(4000);
-  
-  Serial.println("Initializing ESC: Setting PWM Channel to HIGH...");
-  thruster.writeMicroseconds(P_HIGH);
-  delay(4000);
-
-  Serial.println("Initializing ESC: Setting PWM Channel to LOW...");
-  thruster.writeMicroseconds(P_LOW);
-  delay(4000);
-
-  Serial.println("Initializing ESC: Setting PWM Channel to NEUTRAL...");
+  Serial.println("ESC Initialization: Setting thruster output to NEUTRAL...");
   thruster.writeMicroseconds(P_NEUTRAL);
-  delay(4000);
+  delay(THRUSTER_DELAY);
 
-  // // Delay setup to allow enough time to start the script to read from the serial port ("Read-Arduino-Data.ps1")
-  // delay(SETUP_DELAY);
+  #ifdef FULL_ESC_INIT
+    Serial.println("Running full ESC initialization procedure...");
+    Serial.println("  Full ESC Initialization: Setting thruster output to LOW...");
+    thruster.writeMicroseconds(P_LOW);
+    delay(THRUSTER_DELAY);
+
+    Serial.println("  Full ESC Initialization: Setting thruster output to HIGH...");
+    thruster.writeMicroseconds(P_HIGH);
+    delay(THRUSTER_DELAY);
+
+    Serial.println("  Full ESC Initialization: Setting thruster output to NEUTRAL...");
+    thruster.writeMicroseconds(P_NEUTRAL);
+    delay(THRUSTER_DELAY);
+  #endif
+
+  Serial.println("Ready to test thrusters! To record data into a CSV file, launch the");
+  Serial.println("'Read-Serial-Data-Arduino.ps1' in an elevated PowerShell terminal and");
+  Serial.println("press any key to continue.");
+
+  // Wait for any input from user, although only Enter will allow for program to proceed
+  while (Serial.available() == 0) {}
+
+  // Flush the input buffer
+  while (Serial.available() > 0) {
+    Serial.read();
+  }
 
   // Write header of CSV data
   Serial.print("Timestamp (ms),");
@@ -159,6 +177,9 @@ void setup() {
   Serial.print("Thrust Force,");
   Serial.print("Flowing Current");
   Serial.println();
+
+  // Record the first call to micros() to account for startup delay when applying the motion profile
+  GLOBAL_START_TIME_US = micros();
 }
 
 
@@ -166,7 +187,7 @@ void loop() {
   unsigned long startUs = micros();
 
   // Get elapsed time (in ms) relative to PWM profile
-  unsigned long elapsedProfileMs = (startUs / 1000 - SETUP_DELAY) % PROFILE_DURATION_MS;
+  unsigned long elapsedProfileMs = ((startUs - GLOBAL_START_TIME_US) / 1000) % PROFILE_DURATION_MS;
   int pwmValue = -1;
 
   // Select PWM profile based on elapsed MS
@@ -193,7 +214,7 @@ void loop() {
   }
 
   // Get sensor readings
-  float thrustForce = loadCell.get_units(LCA_AVG_SAMPLES);  // This operation takes 100 ms per sample
+  float thrustForce = loadCell.get_units(LCA_AVG_SAMPLES);  // NOTE: This operation takes 100 ms per sample
   float flowingCurrent = fetchCurrentReading();
 
   // Record how much time elapsed for fetching sensor readings
