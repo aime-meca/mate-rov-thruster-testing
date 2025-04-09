@@ -2,7 +2,7 @@
 // Driver Libraries //
 //////////////////////
 
-#include <Servo.h>
+#include <Servo.h> // NOTE: This library assumes a 50 Hz period
 #include "HX711.h"
 
 //////////////////////////
@@ -18,7 +18,7 @@ HX711 loadCell;
 #define CS_PIN A0
 
 // Thruster pins
-#define SERVO_PIN 9
+#define SERVO_PIN 5
 Servo thruster;
 
 //////////////////////////////
@@ -83,7 +83,7 @@ const unsigned long PROFILE_DURATION_MS = 20000;
 ///////////////////////////////
 
 #define LCA_CALIB_FACTOR -7050.0      // NOTE: This value is obtained using the SparkFun_HX711_Calibration sketch
-#define LCA_AVG_SAMPLES 10            // Number of samples to average the reading over
+#define LCA_AVG_SAMPLES 5             // Number of samples to average the reading over
                                       // NOTE: Higher values may lead to buffer overflows
 #define CS_SENSITIVITY 100.0 / 500.0  // 100mA per 500mV = 0.2
 #define CS_VREF 2500                  // Output voltage with no current: ~ 2500mV or 2.5V
@@ -134,8 +134,23 @@ void setup() {
   loadCell.set_scale(LCA_CALIB_FACTOR);
   loadCell.tare(); // Zero out load sensor assuming there is no applied load
 
-  // Delay setup to allow enough time to start the script to read from the serial port ("Read-Arduino-Data.ps1")
-  delay(SETUP_DELAY);
+  // Start thruster ESC initialization
+  delay(4000);
+  
+  Serial.println("Initializing ESC: Setting PWM Channel to HIGH...");
+  thruster.writeMicroseconds(P_HIGH);
+  delay(4000);
+
+  Serial.println("Initializing ESC: Setting PWM Channel to LOW...");
+  thruster.writeMicroseconds(P_LOW);
+  delay(4000);
+
+  Serial.println("Initializing ESC: Setting PWM Channel to NEUTRAL...");
+  thruster.writeMicroseconds(P_NEUTRAL);
+  delay(4000);
+
+  // // Delay setup to allow enough time to start the script to read from the serial port ("Read-Arduino-Data.ps1")
+  // delay(SETUP_DELAY);
 
   // Write header of CSV data
   Serial.print("Timestamp (ms),");
@@ -178,7 +193,7 @@ void loop() {
   }
 
   // Get sensor readings
-  float thrustForce = 0; //loadCell.get_units(LCA_AVG_SAMPLES);
+  float thrustForce = loadCell.get_units(LCA_AVG_SAMPLES);  // This operation takes 100 ms per sample
   float flowingCurrent = fetchCurrentReading();
 
   // Record how much time elapsed for fetching sensor readings
